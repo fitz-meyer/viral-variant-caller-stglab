@@ -36,8 +36,8 @@ params.post_trim_min_length = "60"
 // Host cell filtering
 // --------------------
 // Vero cell: African green monkey genome for host filtering
-params.host_bt_index = "/home/databases/primates/agm_genome"
-params.host_bt_suffix = "agm_genome"
+params.host_bt_index = "${baseDir}/culex_tarsalis/tarsalis"
+params.host_bt_suffix = "tarsalis" // field not used
 params.host_bt_min_score = "60"
 params.host_bt_threads = "8"
 
@@ -51,7 +51,7 @@ params.host_bt_threads = "8"
 // or to a reference seq of your choosing
 //
 params.refseq_dir = "${baseDir}/refseq/"
-params.refseq_name = "NC_045512"
+params.refseq_name = "NC_009942.1"
 // params.refseq_name = "MN985325"
 params.refseq_fasta = "${params.refseq_dir}/${params.refseq_name}.fasta"
 params.refseq_genbank = "${params.refseq_dir}/${params.refseq_name}.gb"
@@ -108,8 +108,13 @@ params.min_allele_freq="0.03"
 */
 Channel
     .fromFilePairs("${params.fastq_dir}/*_R{1,2}*.fastq*", size: -1, checkIfExists: true, maxDepth: 1)
-    .into {samples_ch_qc; samples_ch_trim; samples_ch_count}
 
+    .map { key, reads ->
+        def sample_id = key.replaceFirst(/_S\d+_L\d+$/, '')
+        tuple(sample_id, reads)
+    }
+
+    .into {samples_ch_qc; samples_ch_trim; samples_ch_count}
 
 /*
    Setup some initial indexes and dictionaries needed by downstream processes.
@@ -193,7 +198,7 @@ process initial_qc {
 */
 process initial_fastq_count {
   label 'lowmem_non_threaded'                                                                
-  publishDir "${params.counts_out_dir}", mode:'link'
+  publishDir "${params.counts_out_dir}", mode:'copy'
 
   input:
   tuple val(sample_id), path(initial_fastq) from samples_ch_count
@@ -221,7 +226,7 @@ Collect and compress all raw fastq files --> deliverables
  Use multiqc to merge initial fastqc reports
 */
 process initial_multiqc {
-  publishDir "${params.outdir}", mode:'link'
+  publishDir "${params.outdir}", mode:'copy'
 
   input:
   val(all_sample_ids) from post_initial_qc_ch.collect()
@@ -280,7 +285,7 @@ process trim_adapters_and_low_quality {
 */
 process trimmed_fastq_count {
   label 'lowmem_non_threaded'                                                                
-  publishDir "${params.counts_out_dir}", mode:'link'
+  publishDir "${params.counts_out_dir}", mode:'copy'
 
   input:
   tuple val(sample_id), path(trimmed_fastq) from post_trim_count_ch
@@ -320,7 +325,8 @@ process post_trim_qc {
  Use multiqc to merge post-trimming fastq reports
 */
 process post_trim_multiqc {
-  publishDir "${params.outdir}", mode:'link'
+  publishDir "${params.outdir}", mode:'copy'
+  label 'lowmem_non_threaded'
 
   input:
   val(all_sample_ids) from post_trim_multiqc_ch.collect()
@@ -384,7 +390,7 @@ process host_filtering {
 */
 process host_filtered_fastq_count {
   label 'lowmem_non_threaded'                                                                
-  publishDir "${params.counts_out_dir}", mode:'link'
+  publishDir "${params.counts_out_dir}", mode:'copy'
 
   input:
   tuple val(sample_id), path(filtered_fastq) from post_host_ch_count
@@ -420,31 +426,22 @@ process bwa_align_to_refseq {
   output:
   tuple val(sample_id), path("${sample_id}.bam") into post_bwa_align_ch
 
-
-  // in the following 'shell' code block, 
-  // !{} will be expanded with the values of variables in the nextflow context, and
-  // ${} will be left alone to be used as bash variables (nextflow doesn't expand: leaves for bash)
-  //
-  // see: https://www.nextflow.io/docs/latest/process.html#shell
   shell:
   '''
-  #
-  # this complicated bit constructs a RG header needed by GATK in downstream bam-processing steps
-  #
-  # see: https://gatk.broadinstitute.org/hc/en-us/articles/360035890671-Read-groups
-  #
-  # this solution from: https://www.biostars.org/p/280837/
-  #
-  # the first fastq header from the file
-  header=$(head -n 1 !{input_fastq[0]}) 
-  id=$(echo $header | head -n 1 | cut -f 1-4 -d":" | sed 's/@//' | sed 's/:/_/g')
-  sm=$(echo $header | head -n 1 | grep -Eo "[ATGCN]+$")
-  rg=$(echo "@RG\\tID:$id\\tSM:$id"_"$sm\\tLB:$id"_"$sm\\tPL:ILLUMINA")
-  
   bwa mem \
-  -t !{params.refseq_bwa_threads} \
-  -R $rg \
-  !{params.refseq_fasta} !{input_fastq} | samtools sort -@!{task.cpus} -o !{sample_id}.bam  -
+  -t !{task.cpus} \
+  !{params.refseq_fasta} !{input_fastq} | samtools sort -@!{task.cpus} -o !{sample_id}.sorted.bam  -
+
+  samtools addreplacerg \
+    -@!{task.cpus} \
+    -r ID:!{sample_id} \
+    -r SM:!{sample_id} \
+    -r PL:ILLUMINA \
+    -o !{sample_id}.bam \
+    !{sample_id}.sorted.bam
+
+  rm !{sample_id}.sorted.bam
+
   '''
 }
 
@@ -460,7 +457,7 @@ process bwa_align_to_refseq {
 */
 process apply_bsqr {
   label 'lowmem_non_threaded'                                                                
-  publishDir "${params.bam_out_dir}", mode:'link', pattern: "*.bam"             
+  publishDir "${params.bam_out_dir}", mode:'symlink', pattern: "*.bam"             
 
 
   input:
@@ -497,7 +494,7 @@ process apply_bsqr {
 */
 process refseq_aligned_read_count {
   label 'lowmem_non_threaded'                                                                
-  publishDir "${params.counts_out_dir}", mode:'link'
+  publishDir "${params.counts_out_dir}", mode:'copy'
 
   input:
   tuple val(sample_id), path(bam) from post_bsqr_count_ch
@@ -555,7 +552,7 @@ process tabulate_mapping_stats_one {
  This process concatenates all the mapping stats files 
 */
 process tabulate_stats {
-  publishDir "${params.outdir}", mode:'link'
+  publishDir "${params.outdir}", mode:'copy'
 
   input: 
   path(mapping_stats_files) from post_stats_ch.collect()
@@ -603,7 +600,7 @@ process tabulate_depth_one {
  into a single file using the collectFile operator
 */
 process tabulate_depth {
-  publishDir "${params.outdir}", mode:'link'
+  publishDir "${params.outdir}", mode:'copy'
 
   input: 
   path(depth_files) from post_depth_ch.collect()
@@ -663,7 +660,7 @@ process call_dvgs {
 
 process process_dvg_calls {
   label 'lowmem_non_threaded'
-  publishDir "${params.ditector_out_dir}", mode:'link'
+  publishDir "${params.ditector_out_dir}", mode:'copy'
 
   input:
   tuple val(sample_id), path(di_counts) from post_dvg_call_ch
@@ -684,7 +681,7 @@ process process_dvg_calls {
 
 process tabulate_dvg_calls {
   label 'lowmem_non_threaded'
-  publishDir "${params.outdir}", mode:'link'
+  publishDir "${params.outdir}", mode:'copy'
 
   input:
   path(all_depth) from tabulate_dvg_depth_ch
@@ -706,7 +703,7 @@ process tabulate_dvg_calls {
 */
 process call_snvs {
   label 'lowmem_threaded'
-  publishDir "${params.vcf_out_dir}", mode:'link'                               
+  publishDir "${params.vcf_out_dir}", mode:'symlink'                               
 
 
   input:
@@ -742,7 +739,7 @@ process call_snvs {
 */
 process call_indels {
   label 'lowmem_threaded'
-  publishDir "${params.vcf_out_dir}", mode:'link'                               
+  publishDir "${params.vcf_out_dir}", mode:'symlink'                               
 
 
   input:
@@ -757,7 +754,7 @@ process call_indels {
 
   lofreq index !{input_bam}.indelqual.bam
                                                                                 
-  lofreq call-parallel --pp-threads !{task.cpus} --no-default-filter --call-indels --only-indels -f !{params.refseq_fasta} !{input_bam}.indelqual.bam > !{input_bam}.indel.pre_vcf
+  lofreq call-parallel --pp-threads !{task.cpus} --no-default-filter --call-indels --only-indels -f !{params.refseq_fasta} !{input_bam}.indelqual.bam -o !{input_bam}.indel.pre_vcf
                                                                                 
   lofreq filter -v !{params.min_depth_for_variant_call} -V 0 -a !{params.min_allele_freq} -A 0 --no-defaults -i  !{input_bam}.indel.pre_vcf -o !{input_bam}.indel.vcf
   '''
@@ -773,7 +770,7 @@ process call_indels {
 
 */
 process call_dataset_consensus {
-  publishDir "${params.consensus_out_dir}", mode:'link'
+  publishDir "${params.consensus_out_dir}", mode:'symlink'
 
   input:
   tuple val(sample_id), path(input_bam) from post_bsqr_consensus_ch
@@ -831,7 +828,7 @@ process call_dataset_consensus {
  use snpEff to annotate vcfs 
  */
 process annotate_variants {
-  publishDir "${params.vcf_out_dir}", mode:'link'
+  publishDir "${params.vcf_out_dir}", mode:'symlink'
 
   input:
   tuple val(sample_id), path(vcf) from post_indel_call_ch.concat(post_snv_call_ch)
@@ -862,7 +859,7 @@ process annotate_variants {
  use SnpSift to extract SnpEff annotations
  */
 process extract_annotated_variant_fields {
-  publishDir "${params.vcf_out_dir}", mode:'link'
+  publishDir "${params.vcf_out_dir}", mode:'symlink'
 
   input:
   tuple val(sample_id), path(snp_eff) from post_variant_annotate_ch
@@ -883,7 +880,7 @@ process extract_annotated_variant_fields {
 */
 process prepend_snp_sift_output {
   label 'lowmem_non_threaded'
-  publishDir "${params.vcf_out_dir}", mode:'link'
+  publishDir "${params.vcf_out_dir}", mode:'symlink'
 
   input:
   tuple val(sample_id), path(snp_sifts) from post_snp_sift_ch
@@ -907,7 +904,7 @@ process prepend_snp_sift_output {
  this will tabulate all SNV and indel variants together
 */
 process tabulate_snpeff_variants {
-  publishDir "${params.outdir}", mode:'link'
+  publishDir "${params.outdir}", mode:'symlink'
 
   input:
   path(all_depth) from analyze_variants_depth_ch
@@ -929,7 +926,7 @@ process tabulate_snpeff_variants {
 
 
 process tabulate_fastq_counts {
-  publishDir "${params.outdir}", mode: 'link'
+  publishDir "${params.outdir}", mode: 'symlink'
 
   input:
   path(all_count_files) from post_count_initial_ch.concat(post_count_trim_ch, post_count_host_ch, post_count_refseq_aligned_ch).collect()
