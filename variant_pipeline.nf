@@ -51,7 +51,7 @@ params.host_bt_threads = "8"
 // or to a reference seq of your choosing
 //
 params.refseq_dir = "${baseDir}/refseq/"
-params.refseq_name = "NC_009942.1"
+params.refseq_name = "KR868734.1"
 // params.refseq_name = "MN985325"
 params.refseq_fasta = "${params.refseq_dir}/${params.refseq_name}.fasta"
 params.refseq_genbank = "${params.refseq_dir}/${params.refseq_name}.gb"
@@ -904,7 +904,7 @@ process prepend_snp_sift_output {
  this will tabulate all SNV and indel variants together
 */
 process tabulate_snpeff_variants {
-  publishDir "${params.outdir}", mode:'symlink'
+  publishDir "${params.outdir}", mode:'copy'
 
   input:
   path(all_depth) from analyze_variants_depth_ch
@@ -926,7 +926,7 @@ process tabulate_snpeff_variants {
 
 
 process tabulate_fastq_counts {
-  publishDir "${params.outdir}", mode: 'symlink'
+  publishDir "${params.outdir}", mode: 'copy'
 
   input:
   path(all_count_files) from post_count_initial_ch.concat(post_count_trim_ch, post_count_host_ch, post_count_refseq_aligned_ch).collect()
