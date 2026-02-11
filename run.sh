@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --time=0:20:00
+#SBATCH --time=8:00:00
 #SBATCH --qos=normal
 #SBATCH --partition=amilan
 #SBATCH --job-name=nf-batch
-#SBATCH --mail-user=dcking@colostate.edu
+#SBATCH --mail-user=eafitz@colostate.edu
 #SBATCH --mail-type=END,FAIL,INVALID_DEPEND
 #SBATCH --output=%x.%j.log # gives slurm.ID.log
 
 module load miniforge # for conda
-conda activate vc-nf  # for nextflow
+conda activate variantID_env  # for nextflow
 
 # make a parseable log if run in batch mode
 if [[ ! -t 1 ]]

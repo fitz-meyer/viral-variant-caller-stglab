@@ -260,13 +260,13 @@ process trim_adapters_and_low_quality {
 
   // this handles paired-end data, in which case must specify a paired output file
   def paired_output   = initial_fastq[1] ? "-p ${sample_id}_R2_f.fastq" : ""
-  def paired_adapters = initial_fastq[1] ? "-A AGATCGGAAGAGC -G GCTCTTCCGATCT -A AGATGTGTATAAGAGACAG -G CTGTCTCTTATACACATCT" : ""
+  def paired_adapters = initial_fastq[1] ? "-A AGATCGGAAGAGCACACGTCTGAACTCCAGTCA -G TGACTGGAGTTCAGACGTGTGCTCTTCCGATCT -A AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT -G ACACTCTTTCCCTACACGACGCTCTTCCGATCT" : ""
   // TODO: don't trim this much for non-amplicon data!
   def paired_trimming = initial_fastq[1] ? "-U $params.always_trim_5p_bases -U -${params.always_trim_3p_bases}" : ""
 
   """
   cutadapt \
-   -a AGATCGGAAGAGC -g GCTCTTCCGATCT -a AGATGTGTATAAGAGACAG -g CTGTCTCTTATACACATCT \
+   -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCA -g TGACTGGAGTTCAGACGTGTGCTCTTCCGATCT -a AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT -g ACACTCTTTCCCTACACGACGCTCTTCCGATCT \
    $paired_adapters \
    -q 30,30 \
    --minimum-length ${params.post_trim_min_length} \
@@ -348,7 +348,6 @@ process post_trim_multiqc {
 //       outputting unmapped reads (the --un or --un-conc) options, whereas
 //       for bwa you have to go through additional steps with samtools / bedtools 
 process host_filtering {
-  // publishDir "${params.outdir}", pattern: "*_R1_fh.fastq"
   label 'lowmem_threaded'                                                                
 
   input:
@@ -580,7 +579,7 @@ process tabulate_stats {
  
 */
 process tabulate_depth_one {
-  label 'lowmem_non_threaded'
+  label 'lowmem_threaded_longer_time'
 
   input:
   tuple val(sample_id), path(input_bam) from post_bsqr_depth_ch
@@ -702,7 +701,7 @@ process tabulate_dvg_calls {
  Call SNVs using lofreq
 */
 process call_snvs {
-  label 'lowmem_threaded'
+  label 'lowmem_threaded_longer_time'
   publishDir "${params.vcf_out_dir}", mode:'symlink'                               
 
 
@@ -738,7 +737,7 @@ process call_snvs {
  Call Indels also using lofreq
 */
 process call_indels {
-  label 'lowmem_threaded'
+  label 'lowmem_threaded_longer_time'
   publishDir "${params.vcf_out_dir}", mode:'symlink'                               
 
 
